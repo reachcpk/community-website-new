@@ -1,0 +1,26 @@
+[
+  {
+    "id": "1788270082326",
+    "name": "Praveen Kumar",
+    "email": "reachcpk@gmail.com",
+    "phone": "9620919246",
+    "unitNumber": 250,
+    "unitType": "2BHK",
+    "residentType": "owner",
+    "password": "62aa325a7028224b84566db2915707af739cae2b8ccd37b7a23117a6f3bdc880",
+    "status": "approved",
+    "createdAt": "2026-09-01T13:41:22.326Z"
+  },
+  {
+    "id": "1788274550622",
+    "name": "Anurag Chenabatni",
+    "email": "reachanu33@gmail.com",
+    "phone": "9108052609",
+    "unitNumber": 341,
+    "unitType": "2BHK",
+    "residentType": "owner",
+    "password": "62aa325a7028224b84566db2915707af739cae2b8ccd37b7a23117a6f3bdc880",
+    "status": "approved",
+    "createdAt": "2026-09-01T14:55:50.622Z"
+  }
+]

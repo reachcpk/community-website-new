@@ -1,0 +1,27 @@
+{
+  "name": "society-amenity-booking",
+  "version": "1.0.0",
+  "description": "Amenity booking system for society with 250 units",
+  "main": "backend/server/server-simple-sqlite.js",
+  "scripts": {
+    "start": "node backend/server/server-simple-sqlite.js",
+    "dev": "node backend/server/server-simple-sqlite.js",
+    "init-db": "node backend/database/init-sqlite.js"
+  },
+  "keywords": [
+    "society",
+    "amenity",
+    "booking",
+    "community"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.18.2",
+    "sqlite3": "^5.1.7"
+  },
+  "allowScripts": {
+    "sqlite3@5.1.7": true
+  }
+}
