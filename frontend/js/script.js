@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Setup form handlers
     setupRegistrationForm();
     setupLoginForm();
+    setupForgotPasswordForm();
     setupBookingForm();
     setupLogout();
     
@@ -158,6 +159,51 @@ function setupLoginForm() {
         } catch (error) {
             console.error('Login error:', error);
             alert('Login failed. Please try again.');
+        }
+    });
+}
+
+// Setup forgot password form
+function setupForgotPasswordForm() {
+    const forgotForm = document.getElementById('forgotPasswordForm');
+    if (!forgotForm) return;
+    
+    forgotForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(forgotForm);
+        const data = Object.fromEntries(formData);
+        
+        // Validate passwords match
+        if (data.newPassword !== data.confirmPassword) {
+            alert('New password and confirm password do not match');
+            return;
+        }
+        
+        // Validate password length
+        if (data.newPassword.length < 6) {
+            alert('Password must be at least 6 characters');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/forgot-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                alert(result.message);
+                window.location.href = 'login.html';
+            } else {
+                alert('Password reset failed: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Forgot password error:', error);
+            alert('Password reset failed. Please try again.');
         }
     });
 }

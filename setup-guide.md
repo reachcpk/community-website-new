@@ -62,7 +62,20 @@ npm start
 3. Enter password: test123
 4. Click Login
 
-### 5. Book an Amenity
+### 5. Test Forgot Password
+1. Logout or open an incognito window
+2. Go to http://localhost:3000/login.html
+3. Click **Forgot password?**
+4. Enter the test user's details:
+   - Email: test@example.com
+   - Unit Number: 100
+   - Phone: 1234567890
+   - New Password: newpass123
+   - Confirm Password: newpass123
+5. Click **Reset Password**
+6. Login with the new password
+
+### 6. Book an Amenity
 1. You'll be redirected to the main page
 2. Scroll to "Book an Amenity" section
 3. Select an amenity (e.g., Swimming Pool)
@@ -86,6 +99,7 @@ npm start
 ✅ **Past Date Restriction**: Try booking for yesterday's date
 ✅ **Guest Limit**: Try entering more than 10 guests
 ✅ **Admin Access**: Admin link should be hidden from normal users
+✅ **Forgot Password**: Reset password for an approved pre-registered user
 
 ## Troubleshooting
 

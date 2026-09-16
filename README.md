@@ -17,6 +17,7 @@ A modern amenity booking system for a society with 250 residential units (unit n
   - Prevents same user from booking multiple amenities at same time
   - No past date bookings allowed
 - **Admin Panel**: Approve/reject resident registrations
+- **Forgot Password**: Pre-registered residents can reset password using email, unit number, and phone verification
 - **Mobile-Responsive Design**: Works on all devices
 
 ## Project Structure
@@ -25,10 +26,11 @@ A modern amenity booking system for a society with 250 residential units (unit n
 community-website/
 ├── frontend/            # Frontend files
 │   ├── html/            # HTML pages
-│   │   ├── index.html   # Main booking page
-│   │   ├── register.html # Registration page
-│   │   ├── login.html   # Login page
-│   │   └── admin.html   # Admin approval page
+│   │   ├── index.html            # Main booking page
+│   │   ├── register.html         # Registration page
+│   │   ├── login.html            # Login page
+│   │   ├── forgot-password.html  # Password reset for pre-registered users
+│   │   └── admin.html            # Admin approval page
 │   ├── css/             # Styling
 │   │   └── styles.css
 │   └── js/              # Frontend logic
@@ -73,6 +75,7 @@ community-website/
    - Main application: http://localhost:3000
    - Registration: http://localhost:3000/register.html
    - Login: http://localhost:3000/login.html
+   - Forgot Password: http://localhost:3000/forgot-password.html
    - Admin: http://localhost:3000/admin.html
 
 ## Workflow
@@ -89,7 +92,13 @@ community-website/
    - Enter email and password
    - If approved, you'll be logged in
 
-3. **Book Amenities**:
+3. **Forgot Password**:
+   - Click **Forgot password?** on the login page
+   - Enter your email, unit number, and phone
+   - Set a new password
+   - Only works for approved/pre-registered residents
+
+4. **Book Amenities**:
    - Select amenity from 15 options
    - Choose date and time slot
    - Specify number of guests (max 10)

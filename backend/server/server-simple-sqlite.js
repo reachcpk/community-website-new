@@ -207,6 +207,63 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// Forgot password - for pre-registered users only
+app.post('/api/forgot-password', async (req, res) => {
+    try {
+        const { email, unitNumber, phone, newPassword, confirmPassword } = req.body;
+        
+        // Validate required fields
+        if (!email || !unitNumber || !phone || !newPassword || !confirmPassword) {
+            return res.status(400).json({ success: false, message: 'All fields are required' });
+        }
+        
+        // Validate passwords match
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({ success: false, message: 'Passwords do not match' });
+        }
+        
+        // Validate password length
+        if (newPassword.length < 6) {
+            return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+        }
+        
+        // Find pre-registered user by email, unit number, and phone
+        const users = await query(
+            'SELECT * FROM users WHERE email = ? AND unit_number = ? AND phone = ? AND status = ?',
+            [email, unitNumber, phone, 'approved']
+        );
+        
+        if (users.length === 0) {
+            return res.status(404).json({ success: false, message: 'No matching pre-registered resident found. Please check your details or wait for admin approval.' });
+        }
+        
+        const user = users[0];
+        
+        // Prevent changing admin password through this flow (optional security)
+        if (user.resident_type === 'admin' && user.email !== process.env.ADMIN_EMAIL) {
+            return res.status(403).json({ success: false, message: 'Admin password cannot be reset here' });
+        }
+        
+        // Update password
+        const hashedPassword = hashPassword(newPassword);
+        await run(
+            'UPDATE users SET password = ? WHERE id = ?',
+            [hashedPassword, user.id]
+        );
+        
+        // Clear any active sessions for this user
+        await run(
+            'UPDATE sessions SET active = 0 WHERE email = ?',
+            [email]
+        );
+        
+        res.json({ success: true, message: 'Password reset successful. Please login with your new password.' });
+    } catch (error) {
+        console.error('Forgot password error:', error);
+        res.status(500).json({ success: false, message: 'Password reset failed' });
+    }
+});
+
 // Logout user
 app.post('/api/logout', async (req, res) => {
     try {
