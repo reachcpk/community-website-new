@@ -60,29 +60,29 @@ async function requireAdmin(req, res, next) {
     try {
         const cookies = parseCookies(req);
         const userCookie = cookies.society_user;
-        
+
         if (!userCookie) {
             return res.status(401).json({ success: false, message: 'Please login as admin' });
         }
-        
+
         const user = JSON.parse(userCookie);
         const email = user.email;
-        
+
         if (!email) {
             return res.status(401).json({ success: false, message: 'Invalid session' });
         }
-        
+
         // Check if user is admin
         const adminEmail = process.env.ADMIN_EMAIL || 'admin@society.com';
         const adminUsers = await query(
             'SELECT * FROM users WHERE email = ? AND (resident_type = ? OR email = ?)',
             [email, 'admin', adminEmail]
         );
-        
+
         if (adminUsers.length === 0) {
             return res.status(403).json({ success: false, message: 'Admin access required' });
         }
-        
+
         req.adminUser = adminUsers[0];
         next();
     } catch (error) {
@@ -94,6 +94,16 @@ async function requireAdmin(req, res, next) {
 // Password hashing
 function hashPassword(password) {
     return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+// Normalize phone number for comparison
+// Strips non-digits, removes leading zero(s), and removes common country code prefixes like 91
+function normalizePhone(phone) {
+    if (!phone) return '';
+    return phone.toString()
+        .replace(/\D/g, '')       // Remove all non-digit characters
+        .replace(/^0+/, '')        // Remove leading zero(s)
+        .replace(/^(91|0)/, '');   // Remove India country code or extra leading zero
 }
 
 // Check if user has active session
@@ -132,31 +142,31 @@ app.post('/api/check-unit', async (req, res) => {
 app.post('/api/register', async (req, res) => {
     try {
         const { name, email, phone, unitNumber, unitType, residentType, password } = req.body;
-        
+
         // Validate unit number range
         if (unitNumber < 100 || unitNumber > 6000) {
             return res.json({ success: false, message: 'Unit number must be between 100 and 6000' });
         }
-        
+
         // Check if email already exists
         const emailExists = await query('SELECT id FROM users WHERE email = ?', [email]);
         if (emailExists.length > 0) {
             return res.json({ success: false, message: 'Email already registered' });
         }
-        
+
         // Check if unit number already exists
         const unitExists = await query('SELECT id FROM users WHERE unit_number = ?', [unitNumber]);
         if (unitExists.length > 0) {
             return res.json({ success: false, message: 'Unit number already registered' });
         }
-        
+
         // Create new user
         const userId = Date.now().toString();
         await run(
             'INSERT INTO users (id, name, email, phone, unit_number, unit_type, resident_type, password, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [userId, name, email, phone, unitNumber, unitType, residentType, hashPassword(password), 'pending']
         );
-        
+
         res.json({ success: true, message: 'Registration submitted for approval' });
     } catch (error) {
         console.error('Registration error:', error);
@@ -168,36 +178,36 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        
+
         const users = await query(
             'SELECT * FROM users WHERE email = ? AND password = ?',
             [email, hashPassword(password)]
         );
-        
+
         if (users.length === 0) {
             return res.json({ success: false, message: 'Invalid credentials' });
         }
-        
+
         const user = users[0];
-        
+
         // Check if user is approved
         if (user.status !== 'approved') {
             return res.json({ success: false, message: 'Account not approved by admin' });
         }
-        
+
         // Check if user already has active session
         const hasSession = await hasActiveSession(email);
         if (hasSession) {
             return res.json({ success: false, message: 'User already logged in. Please logout first.' });
         }
-        
+
         // Create session
         const sessionId = crypto.randomUUID();
         await run(
             'INSERT INTO sessions (id, email, user_id, active) VALUES (?, ?, ?, 1)',
             [sessionId, email, user.id]
         );
-        
+
         // Return user data (without password)
         const { password: _, ...userWithoutPassword } = user;
         res.json({ success: true, user: userWithoutPassword });
@@ -211,52 +221,57 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/forgot-password', async (req, res) => {
     try {
         const { email, unitNumber, phone, newPassword, confirmPassword } = req.body;
-        
+
         // Validate required fields
         if (!email || !unitNumber || !phone || !newPassword || !confirmPassword) {
             return res.status(400).json({ success: false, message: 'All fields are required' });
         }
-        
+
         // Validate passwords match
         if (newPassword !== confirmPassword) {
             return res.status(400).json({ success: false, message: 'Passwords do not match' });
         }
-        
+
         // Validate password length
         if (newPassword.length < 6) {
             return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
         }
-        
-        // Find pre-registered user by email, unit number, and phone
+
+        // Normalize unit number and phone for comparison
+        const normalizedUnitNumber = parseInt(unitNumber, 10);
+        const normalizedInputPhone = normalizePhone(phone);
+
+        // Find pre-registered user by email and unit number (phone verified separately due to formatting variations)
         const users = await query(
-            'SELECT * FROM users WHERE email = ? AND unit_number = ? AND phone = ? AND status = ?',
-            [email, unitNumber, phone, 'approved']
+            'SELECT * FROM users WHERE email = ? AND unit_number = ? AND status = ?',
+            [email, normalizedUnitNumber, 'approved']
         );
-        
-        if (users.length === 0) {
+
+        // Match user by normalized phone number
+        const user = users.find(u => normalizePhone(u.phone) === normalizedInputPhone);
+
+        if (!user) {
             return res.status(404).json({ success: false, message: 'No matching pre-registered resident found. Please check your details or wait for admin approval.' });
         }
-        
-        const user = users[0];
-        
+
         // Prevent changing admin password through this flow (optional security)
         if (user.resident_type === 'admin' && user.email !== process.env.ADMIN_EMAIL) {
             return res.status(403).json({ success: false, message: 'Admin password cannot be reset here' });
         }
-        
+
         // Update password
         const hashedPassword = hashPassword(newPassword);
         await run(
             'UPDATE users SET password = ? WHERE id = ?',
             [hashedPassword, user.id]
         );
-        
+
         // Clear any active sessions for this user
         await run(
             'UPDATE sessions SET active = 0 WHERE email = ?',
             [email]
         );
-        
+
         res.json({ success: true, message: 'Password reset successful. Please login with your new password.' });
     } catch (error) {
         console.error('Forgot password error:', error);
@@ -268,12 +283,12 @@ app.post('/api/forgot-password', async (req, res) => {
 app.post('/api/logout', async (req, res) => {
     try {
         const { email } = req.body;
-        
+
         await run(
             'UPDATE sessions SET active = 0 WHERE email = ?',
             [email]
         );
-        
+
         res.json({ success: true });
     } catch (error) {
         console.error('Logout error:', error);
@@ -285,43 +300,43 @@ app.post('/api/logout', async (req, res) => {
 app.post('/api/book', async (req, res) => {
     try {
         const { name, email, phone, unitNumber, amenity, date, time, guests, notes } = req.body;
-        
+
         // Check for duplicate booking (same amenity, date, time)
         const duplicateAmenity = await query(
             'SELECT id FROM bookings WHERE amenity = ? AND booking_date = ? AND time_slot = ?',
             [amenity, date, time]
         );
-        
+
         if (duplicateAmenity.length > 0) {
             return res.json({ success: false, message: 'This amenity is already booked for this time slot' });
         }
-        
+
         // Check for same user booking multiple amenities at same time
         const sameUserConflict = await query(
             'SELECT id FROM bookings WHERE (email = ? OR phone = ?) AND booking_date = ? AND time_slot = ?',
             [email, phone, date, time]
         );
-        
+
         if (sameUserConflict.length > 0) {
             return res.json({ success: false, message: 'You already have another amenity booked at this time' });
         }
-        
+
         // Validate required fields
         if (!name || !email || !phone || !unitNumber || !amenity || !date || !time || !guests) {
             return res.status(400).json({ success: false, message: 'Missing required booking fields' });
         }
-        
+
         // Create booking
         const bookingId = Date.now().toString();
         await run(
             'INSERT INTO bookings (id, name, email, phone, unit_number, amenity, booking_date, time_slot, guests, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [bookingId, name, email, phone, unitNumber, amenity, date, time, parseInt(guests), notes || '']
         );
-        
+
         res.json({ success: true, message: 'Booking confirmed' });
     } catch (error) {
         console.error('Booking error:', error);
-        const errorMessage = error.message && error.message.includes('SQLITE_CONSTRAINT') 
+        const errorMessage = error.message && error.message.includes('SQLITE_CONSTRAINT')
             ? 'Booking failed: Missing required information. Please ensure all fields are filled.'
             : 'Booking failed: Server error. Please try again.';
         res.status(500).json({ success: false, message: errorMessage });
@@ -345,16 +360,16 @@ app.get('/api/registrations', requireAdmin, async (req, res) => {
 app.post('/api/approve', requireAdmin, async (req, res) => {
     try {
         const { email } = req.body;
-        
+
         const result = await run(
             'UPDATE users SET status = ? WHERE email = ?',
             ['approved', email]
         );
-        
+
         if (result.changes === 0) {
             return res.json({ success: false, message: 'User not found' });
         }
-        
+
         res.json({ success: true, message: 'User approved' });
     } catch (error) {
         console.error('Approve error:', error);
@@ -366,16 +381,16 @@ app.post('/api/approve', requireAdmin, async (req, res) => {
 app.post('/api/reject', requireAdmin, async (req, res) => {
     try {
         const { email } = req.body;
-        
+
         const result = await run(
             'UPDATE users SET status = ? WHERE email = ?',
             ['rejected', email]
         );
-        
+
         if (result.changes === 0) {
             return res.json({ success: false, message: 'User not found' });
         }
-        
+
         res.json({ success: true, message: 'User rejected' });
     } catch (error) {
         console.error('Reject error:', error);
