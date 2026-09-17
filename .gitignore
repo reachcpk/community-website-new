@@ -2,6 +2,7 @@ node_modules/
 *.db
 .DS_Store
 .env
+My-Community/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
