@@ -4,7 +4,7 @@ A modern amenity booking system for a society with 250 residential units (unit n
 
 ## Features
 
-- **15 Amenities Available**: Swimming Pool, Tennis Court, Gym, Community Room, BBQ Area, Playground, Basketball Court, Yoga Studio, Library, Garden, Carrom Room, Table Tennis, Billiards Room, Meeting Hall, Kids Club
+- **Admin-Managed Amenities**: No built-in amenities — the admin creates them via the Amenity Maintenance screen (`/amenity-maintenance.html`), and they appear on the home page and booking form automatically
 - **250 Unit Capacity**: Supports 250 residential units with unit numbers ranging from 100-6000
 - **Resident Authentication**: 
   - Registration with unit verification (100-6000)
@@ -30,7 +30,8 @@ community-website/
 │   │   ├── register.html         # Registration page
 │   │   ├── login.html            # Login page
 │   │   ├── forgot-password.html  # Password reset for pre-registered users
-│   │   └── admin.html            # Admin approval page
+│   │   ├── admin.html            # Admin approval page
+│   │   └── amenity-maintenance.html  # Admin amenity management
 │   ├── css/             # Styling
 │   │   └── styles.css
 │   └── js/              # Frontend logic
@@ -77,6 +78,7 @@ community-website/
    - Login: http://localhost:3000/login.html
    - Forgot Password: http://localhost:3000/forgot-password.html
    - Admin: http://localhost:3000/admin.html
+   - Amenity Maintenance (admin): http://localhost:3000/amenity-maintenance.html
 
 ## Workflow
 
@@ -149,8 +151,8 @@ community-website/
 
 ## Customization
 
-### Add More Amenities:
-Edit `frontend/html/index.html` and add to the amenities section and booking form dropdown.
+### Add/Remove Amenities:
+Login as admin and open the **Maintenance** link in the navbar (or go to `/amenity-maintenance.html`). Amenities are stored in the SQLite `amenities` table and rendered dynamically.
 
 ### Change Unit Capacity:
 Update validation in `backend/server/server-simple-sqlite.js` and `frontend/html/register.html` to change the unit number range (currently 100-6000).

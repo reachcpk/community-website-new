@@ -15,7 +15,8 @@
                 <li><a href="#amenities">Amenities</a></li>
                 <li><a href="#booking">Book Now</a></li>
                 <li><a href="#" id="logoutBtn">Logout</a></li>
-                <li><a href="admin.html">Admin</a></li>
+                <li class="admin-only"><a href="admin.html">Admin</a></li>
+                <li class="admin-only"><a href="amenity-maintenance.html">Maintenance</a></li>
             </ul>
         </nav>
     </header>
@@ -31,68 +32,12 @@
 
         <section id="amenities" class="amenities-section">
             <h2>Our Amenities</h2>
-            <div class="amenities-grid">
-                <div class="amenity-card">
-                    <h3>Swimming Pool</h3>
-                    <p>Heated pool with lounge chairs and cabanas</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Tennis Court</h3>
-                    <p>Professional tennis court available for booking</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Gym</h3>
-                    <p>State-of-the-art fitness center with modern equipment</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Community Room</h3>
-                    <p>Perfect for meetings, parties, and gatherings</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>BBQ Area</h3>
-                    <p>Outdoor grilling space with picnic tables</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Playground</h3>
-                    <p>Safe and fun playground for children of all ages</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Basketball Court</h3>
-                    <p>Full-court basketball for games and practice</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Yoga Studio</h3>
-                    <p>Peaceful space for yoga and meditation classes</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Library</h3>
-                    <p>Quiet reading room with book exchange program</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Garden</h3>
-                    <p>Community garden plots available for residents</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Carrom Room</h3>
-                    <p>Indoor games room with carrom and board games</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Table Tennis</h3>
-                    <p>Indoor table tennis for year-round play</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Billiards Room</h3>
-                    <p>Professional billiards table for residents</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Meeting Hall</h3>
-                    <p>Large space for society meetings and events</p>
-                </div>
-                <div class="amenity-card">
-                    <h3>Kids Club</h3>
-                    <p>Activity center for children with educational and recreational programs</p>
-                </div>
+            <div class="amenities-grid" id="amenitiesGrid">
+                <!-- Amenities are loaded dynamically from the server -->
             </div>
+            <p id="noAmenities" class="hidden" style="text-align: center; color: #666; padding: 2rem;">
+                No amenities have been added yet. Please check back later.
+            </p>
         </section>
 
         <section id="booking" class="booking-section">
@@ -106,21 +51,7 @@
                         <label for="amenity">Select Amenity</label>
                         <select id="amenity" name="amenity" required>
                             <option value="">Choose an amenity</option>
-                            <option value="swimming-pool">Swimming Pool</option>
-                            <option value="tennis-court">Tennis Court</option>
-                            <option value="gym">Gym</option>
-                            <option value="community-room">Community Room</option>
-                            <option value="bbq-area">BBQ Area</option>
-                            <option value="playground">Playground</option>
-                            <option value="basketball-court">Basketball Court</option>
-                            <option value="yoga-studio">Yoga Studio</option>
-                            <option value="library">Library</option>
-                            <option value="garden">Garden</option>
-                            <option value="carrom-room">Carrom Room</option>
-                            <option value="table-tennis">Table Tennis</option>
-                            <option value="billiards-room">Billiards Room</option>
-                            <option value="meeting-hall">Meeting Hall</option>
-                            <option value="kids-club">Kids Club</option>
+                            <!-- Amenity options are loaded dynamically -->
                         </select>
                     </div>
 

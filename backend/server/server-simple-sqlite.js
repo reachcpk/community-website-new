@@ -23,6 +23,16 @@ const db = new sqlite3.Database(dbPath, (err) => {
     console.log('Connected to SQLite database successfully!');
 });
 
+// Ensure amenities table exists (safe for already-initialized databases)
+db.exec(`CREATE TABLE IF NOT EXISTS amenities (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`, (err) => {
+    if (err) console.error('Amenities table setup failed:', err.message);
+});
+
 // Helper function to run queries
 function query(sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -296,6 +306,63 @@ app.post('/api/logout', async (req, res) => {
     }
 });
 
+// Get all amenities (public - used by amenities grid and booking form)
+app.get('/api/amenities', async (req, res) => {
+    try {
+        const amenities = await query(
+            'SELECT id, name, description, created_at FROM amenities ORDER BY name'
+        );
+        res.json(amenities);
+    } catch (error) {
+        console.error('Get amenities error:', error);
+        res.status(500).json({ success: false, message: 'Failed to load amenities' });
+    }
+});
+
+// Create amenity (admin)
+app.post('/api/amenities', requireAdmin, async (req, res) => {
+    try {
+        const { name, description } = req.body;
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({ success: false, message: 'Amenity name is required' });
+        }
+
+        const trimmedName = name.trim();
+        const existing = await query('SELECT id FROM amenities WHERE LOWER(name) = LOWER(?)', [trimmedName]);
+        if (existing.length > 0) {
+            return res.json({ success: false, message: 'An amenity with this name already exists' });
+        }
+
+        const amenityId = crypto.randomUUID();
+        await run(
+            'INSERT INTO amenities (id, name, description) VALUES (?, ?, ?)',
+            [amenityId, trimmedName, (description || '').trim()]
+        );
+
+        res.json({ success: true, message: 'Amenity created', amenity: { id: amenityId, name: trimmedName } });
+    } catch (error) {
+        console.error('Create amenity error:', error);
+        res.status(500).json({ success: false, message: 'Failed to create amenity' });
+    }
+});
+
+// Delete amenity (admin)
+app.delete('/api/amenities/:id', requireAdmin, async (req, res) => {
+    try {
+        const result = await run('DELETE FROM amenities WHERE id = ?', [req.params.id]);
+
+        if (result.changes === 0) {
+            return res.json({ success: false, message: 'Amenity not found' });
+        }
+
+        res.json({ success: true, message: 'Amenity deleted' });
+    } catch (error) {
+        console.error('Delete amenity error:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete amenity' });
+    }
+});
+
 // Book amenity
 app.post('/api/book', async (req, res) => {
     try {
@@ -324,6 +391,12 @@ app.post('/api/book', async (req, res) => {
         // Validate required fields
         if (!name || !email || !phone || !unitNumber || !amenity || !date || !time || !guests) {
             return res.status(400).json({ success: false, message: 'Missing required booking fields' });
+        }
+
+        // Validate amenity exists
+        const amenityExists = await query('SELECT id FROM amenities WHERE name = ?', [amenity]);
+        if (amenityExists.length === 0) {
+            return res.json({ success: false, message: 'Selected amenity is not available' });
         }
 
         // Create booking
@@ -399,9 +472,14 @@ app.post('/api/reject', requireAdmin, async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+    let amenityCount = 0;
+    try {
+        const rows = await query('SELECT COUNT(*) as c FROM amenities');
+        amenityCount = rows[0].c;
+    } catch (e) { /* ignore */ }
     console.log(`Society Hub server running on http://localhost:${PORT}`);
     console.log(`Society capacity: 250 units (Unit numbers: 100-6000)`);
-    console.log(`Amenities available: 15`);
+    console.log(`Amenities available: ${amenityCount}`);
     console.log(`Database: SQLite (society-booking.db)`);
 });

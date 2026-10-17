@@ -91,7 +91,7 @@ npm start
 
 ## Key Features to Test
 
-✅ **15 Amenities**: Check all 15 options in dropdown
+✅ **Amenities**: Admin adds amenities via /amenity-maintenance.html; they appear in the booking dropdown
 ✅ **Unit Range**: Try registering with unit numbers between 100-6000
 ✅ **Single Login**: Try logging in twice simultaneously
 ✅ **Same-User Conflict**: Try booking multiple amenities at same time

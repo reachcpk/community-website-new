@@ -66,6 +66,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS amenities (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_unit_number ON users(unit_number);
 CREATE INDEX IF NOT EXISTS idx_status ON users(status);
@@ -100,7 +107,7 @@ db.exec(schema, (err) => {
 
             console.log('\n✅ Database initialization complete!');
             console.log('Database: SQLite (society-booking.db)');
-            console.log('Tables created: users, bookings, sessions');
+            console.log('Tables created: users, bookings, sessions, amenities');
 
             db.close((err) => {
                 if (err) {

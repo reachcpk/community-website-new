@@ -18,7 +18,16 @@ document.addEventListener('DOMContentLoaded', function() {
     if (window.location.pathname.includes('admin.html')) {
         loadRegistrations();
     }
-    
+
+    // Setup amenity maintenance page
+    if (window.location.pathname.includes('amenity-maintenance.html')) {
+        setupAmenityForm();
+        loadAmenitiesAdmin();
+    }
+
+    // Load amenities for public pages (grid + booking dropdown)
+    loadAmenities();
+
     // Setup date restriction for booking
     setupDateRestriction();
 });
@@ -427,31 +436,163 @@ async function rejectUser(email) {
     }
 }
 
-// Update admin link visibility in navbar
-function updateAdminLink() {
-    const adminLink = document.querySelector('a[href="admin.html"]');
-    if (adminLink) {
-        if (currentUser && (currentUser.residentType === 'admin' || currentUser.resident_type === 'admin' || currentUser.email === 'admin@society.com')) {
-            adminLink.style.display = 'inline';
-        } else {
-            adminLink.style.display = 'none';
+// Load amenities into the public grid and booking dropdown
+async function loadAmenities() {
+    const grid = document.getElementById('amenitiesGrid');
+    const select = document.getElementById('amenity');
+    if (!grid && !select) return;
+
+    try {
+        const response = await fetch('/api/amenities');
+        const amenities = await response.json();
+
+        if (grid) {
+            const noAmenities = document.getElementById('noAmenities');
+            if (Array.isArray(amenities) && amenities.length > 0) {
+                grid.innerHTML = amenities.map(a => `
+                    <div class="amenity-card">
+                        <h3>${escapeHtml(a.name)}</h3>
+                        <p>${escapeHtml(a.description || '')}</p>
+                    </div>
+                `).join('');
+            } else if (noAmenities) {
+                noAmenities.classList.remove('hidden');
+            }
         }
+
+        if (select) {
+            select.innerHTML = '<option value="">Choose an amenity</option>' +
+                (Array.isArray(amenities) ? amenities : [])
+                    .map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`)
+                    .join('');
+        }
+    } catch (error) {
+        console.error('Error loading amenities:', error);
     }
 }
 
-// Protect admin page - redirect non-admin users
+// Setup amenity creation form (admin maintenance page)
+function setupAmenityForm() {
+    const amenityForm = document.getElementById('amenityForm');
+    if (!amenityForm) return;
+
+    amenityForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const data = Object.fromEntries(new FormData(amenityForm));
+
+        try {
+            const response = await fetch('/api/amenities', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                amenityForm.reset();
+                loadAmenitiesAdmin();
+            } else {
+                alert('Failed to add amenity: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Add amenity error:', error);
+            alert('Failed to add amenity. Please try again.');
+        }
+    });
+}
+
+// Load amenities for the admin maintenance table
+async function loadAmenitiesAdmin() {
+    try {
+        const response = await fetch('/api/amenities', {
+            credentials: 'same-origin'
+        });
+        const amenities = await response.json();
+
+        const loading = document.getElementById('amenitiesLoading');
+        const noAmenities = document.getElementById('noAmenitiesMsg');
+        const tbody = document.getElementById('amenitiesBody');
+
+        loading.classList.add('hidden');
+
+        if (!Array.isArray(amenities) || amenities.length === 0) {
+            tbody.innerHTML = '';
+            noAmenities.classList.remove('hidden');
+            return;
+        }
+
+        noAmenities.classList.add('hidden');
+        tbody.innerHTML = amenities.map(a => `
+            <tr>
+                <td>${escapeHtml(a.name)}</td>
+                <td>${escapeHtml(a.description || '-')}</td>
+                <td>${a.created_at ? a.created_at.split(' ')[0] : '-'}</td>
+                <td>
+                    <button class="approve-button" style="background: #dc3545;" onclick="deleteAmenity('${a.id}')">Delete</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading amenities:', error);
+        document.getElementById('amenitiesLoading').textContent = 'Error loading amenities';
+    }
+}
+
+// Delete amenity (admin)
+async function deleteAmenity(id) {
+    if (!confirm('Are you sure you want to delete this amenity?')) return;
+
+    try {
+        const response = await fetch('/api/amenities/' + encodeURIComponent(id), {
+            method: 'DELETE',
+            credentials: 'same-origin'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            loadAmenitiesAdmin();
+        } else {
+            alert('Delete failed: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Delete amenity error:', error);
+        alert('Delete failed. Please try again.');
+    }
+}
+
+// Escape HTML to prevent injection when rendering dynamic content
+function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+// Update admin link visibility in navbar
+function updateAdminLink() {
+    const isAdmin = currentUser && (currentUser.residentType === 'admin' || currentUser.resident_type === 'admin' || currentUser.email === 'admin@society.com');
+    document.querySelectorAll('.admin-only').forEach(el => {
+        el.style.display = isAdmin ? '' : 'none';
+    });
+}
+
+// Protect admin pages - redirect non-admin users
 function protectAdminPage() {
-    if (window.location.pathname.includes('admin.html')) {
+    const adminPages = ['admin.html', 'amenity-maintenance.html'];
+    if (adminPages.some(p => window.location.pathname.includes(p))) {
         if (!currentUser) {
             alert('Please login as admin to access this page.');
             window.location.href = 'login.html';
             return;
         }
-        
-        const isAdmin = currentUser.residentType === 'admin' || 
-                       currentUser.resident_type === 'admin' || 
+
+        const isAdmin = currentUser.residentType === 'admin' ||
+                       currentUser.resident_type === 'admin' ||
                        currentUser.email === 'admin@society.com';
-        
+
         if (!isAdmin) {
             alert('You do not have permission to access the admin page.');
             window.location.href = 'index.html';
