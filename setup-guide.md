@@ -9,11 +9,12 @@ If you don't have Node.js installed:
 ## Step 2: Install Dependencies
 Open Command Prompt (not PowerShell) and run:
 ```bash
-cd C:\Users\DELL 7420\community-website-new
+cd community-website-new
 npm install
 ```
 
 ## Step 3: Initialize SQLite Database (First Time)
+Copy `.env.example` to `.env` and set `ADMIN_EMAIL` / `ADMIN_PASSWORD`, then:
 ```bash
 npm run init-db
 ```
@@ -34,8 +35,8 @@ npm start
 ### 1. Login as Admin
 1. Go to http://localhost:3000/login.html
 2. Enter:
-   - Email: `admin@society.com`
-   - Password: `admin123`
+   - Email: the `ADMIN_EMAIL` from your `.env`
+   - Password: the `ADMIN_PASSWORD` from your `.env`
 3. Click Login
 4. The Admin link will appear in the navbar
 
@@ -109,7 +110,7 @@ Install Node.js from https://nodejs.org/ and restart Command Prompt.
 ### "Port already in use"
 Another process is using port 3000. Either:
 - Close the other process, or
-- Change the PORT in `backend/server/server-simple-sqlite.js` (line 7)
+- Set `PORT` in your `.env` file
 
 ### "Cannot find module 'sqlite3'"
 Run `npm install` again to ensure all dependencies are installed.
@@ -122,10 +123,7 @@ Run `npm run init-db` to create the SQLite database.
 
 ## File Locations
 
-All files are in: `C:\Users\DELL 7420\community-website-new\`
-
 - Frontend: `frontend/` folder
 - Backend: `backend/server/server-simple-sqlite.js`
 - Database: `backend/database/society-booking.db`
-- Data: `data/` folder
 - Dependencies: `node_modules/` (created by npm install)

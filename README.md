@@ -9,9 +9,9 @@ A modern amenity booking system for a society with 250 residential units (unit n
 - **Resident Authentication**: 
   - Registration with unit verification (100-6000)
   - Admin approval required for new residents
-  - Session-based login (user cannot login twice simultaneously)
+  - Session-based login (one active session per user; a new login ends the previous one)
 - **Booking System**:
-  - Book any of 15 amenities
+  - Book any admin-created amenity
   - Maximum 10 guests per booking
   - Prevents duplicate amenity bookings at same time
   - Prevents same user from booking multiple amenities at same time
@@ -43,10 +43,6 @@ community-website/
 │   │   ├── init-sqlite.js           # SQLite database initialization
 │   │   └── society-booking.db       # SQLite database file
 │   └── config/          # Configuration files
-├── data/                # JSON Data storage
-│   ├── users.json
-│   ├── bookings.json
-│   └── sessions.json
 ├── .gitignore           # Git ignore rules
 ├── README.md            # This file
 ├── setup-guide.md       # Setup instructions
@@ -101,14 +97,14 @@ community-website/
    - Only works for approved/pre-registered residents
 
 4. **Book Amenities**:
-   - Select amenity from 15 options
+   - Select an amenity
    - Choose date and time slot
    - Specify number of guests (max 10)
    - Submit booking
 
 ### For Admin:
 
-1. **Login**: Use admin credentials (default: `admin@society.com` / `admin123`)
+1. **Login**: Use the `ADMIN_EMAIL` / `ADMIN_PASSWORD` you set in `.env` before running `npm run init-db` (re-run `npm run init-db` to reset the admin password)
 2. **Access Admin Panel**: Go to `/admin.html` (or click Admin link in navbar)
 3. **Review Registrations**: See all pending registrations
 4. **Approve/Reject**: Click approve or reject for each registration
@@ -117,9 +113,9 @@ community-website/
 ## Key Features Explained
 
 ### Single Login Restriction
-- Users cannot login twice simultaneously
-- Session tracking prevents duplicate logins
-- Must logout before logging in again
+- Each user has at most one active session
+- Logging in again (e.g. on another device) automatically logs out the previous session
+- Sessions expire after 7 days
 
 ### Same-User Conflict Prevention
 - A user cannot book multiple amenities at the same date/time
@@ -143,8 +139,11 @@ community-website/
 
 ## Security Features
 
-- Password hashing using SHA-256
-- Session-based authentication
+- Salted password hashing using scrypt (legacy SHA-256 hashes are upgraded on next login)
+- Server-side sessions in an HttpOnly, SameSite=Strict cookie
+- Bookings are always made as the logged-in user (identity comes from the session)
+- Rate limiting on login and forgot-password
+- Admin accounts cannot be reset through the public forgot-password form
 - Admin approval required for new users
 - Input validation on all forms
 - Admin-only access to admin panel and APIs
@@ -163,13 +162,22 @@ Edit the time slot options in `frontend/html/index.html`.
 ## Troubleshooting
 
 ### Port Already in Use:
-If port 3000 is busy, change the PORT variable in `backend/server/server-simple-sqlite.js`.
+If port 3000 is busy, set `PORT` in your `.env` file.
 
 ### npm not recognized:
 Install Node.js from https://nodejs.org/ and restart your terminal.
 
 ### Database not found:
-Run `npm run init-db` to initialize the SQLite database.
+The server creates the tables automatically on start. Run `npm run init-db` to create the admin account.
+
+### Admin login fails:
+If your admin password contains `#`, wrap it in quotes in `.env` (e.g. `ADMIN_PASSWORD="pa#ss"`), then re-run `npm run init-db`.
+
+## Tests
+
+```bash
+npm test
+```
 
 ## Technologies Used
 
