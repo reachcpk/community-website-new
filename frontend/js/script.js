@@ -4,13 +4,14 @@ let bookings = [];
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async function() {
-    // Check if user is logged in (must finish before pages that depend on it are set up)
-    await checkLoginStatus();
-    
-    // Setup form handlers
+    // Password forms must have handlers before any await, so they never fall back to a native GET submit
     setupRegistrationForm();
     setupLoginForm();
     setupForgotPasswordForm();
+
+    // Check if user is logged in (must finish before pages that depend on it are set up)
+    await checkLoginStatus();
+
     setupBookingForm();
     setupLogout();
     

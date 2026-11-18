@@ -41,16 +41,21 @@ applySchema(db).then(() => {
                 console.log(`✅ Admin user ready (email: ${ADMIN_EMAIL})`);
             }
 
-            console.log('\n✅ Database initialization complete!');
-            console.log('Database: SQLite (society-booking.db)');
-            console.log('Tables created: users, bookings, sessions, amenities');
+            // Password may have changed: end existing admin sessions
+            db.run('UPDATE sessions SET active = 0 WHERE user_id = ?', ['admin001'], (sessionErr) => {
+                if (sessionErr) console.error('❌ Could not clear admin sessions:', sessionErr.message);
 
-            db.close((err) => {
-                if (err) {
-                    console.error('❌ Error closing database:', err.message);
-                } else {
-                    console.log('Database connection closed.');
-                }
+                console.log('\n✅ Database initialization complete!');
+                console.log('Database: SQLite (society-booking.db)');
+                console.log('Tables created: users, bookings, sessions, amenities');
+
+                db.close((err) => {
+                    if (err) {
+                        console.error('❌ Error closing database:', err.message);
+                    } else {
+                        console.log('Database connection closed.');
+                    }
+                });
             });
         }
     );

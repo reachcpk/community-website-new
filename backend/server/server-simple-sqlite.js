@@ -137,12 +137,20 @@ function requireAdmin(req, res, next) {
     });
 }
 
-// Simple in-memory rate limiter for credential endpoints
+// Simple in-memory per-IP rate limiter; use one instance per endpoint
 function rateLimit({ windowMs, max }) {
     const hits = new Map();
+    const sweep = setInterval(() => {
+        const now = Date.now();
+        for (const [key, entry] of hits) {
+            if (now - entry.start > windowMs) hits.delete(key);
+        }
+    }, windowMs);
+    sweep.unref();
+
     return (req, res, next) => {
         const now = Date.now();
-        const key = `${req.ip}:${req.path}`;
+        const key = req.ip;
         const entry = hits.get(key);
         if (!entry || now - entry.start > windowMs) {
             hits.set(key, { start: now, count: 1 });
@@ -155,7 +163,9 @@ function rateLimit({ windowMs, max }) {
         next();
     };
 }
-const credentialLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
+const CREDENTIAL_LIMIT = { windowMs: 15 * 60 * 1000, max: 10 };
+const loginLimiter = rateLimit(CREDENTIAL_LIMIT);
+const forgotPasswordLimiter = rateLimit(CREDENTIAL_LIMIT);
 
 // Normalize phone number for comparison
 // Keeps the last 10 digits so "+91 98765 43210", "098765 43210" and "9876543210" all match
@@ -251,7 +261,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 // Login user
-app.post('/api/login', credentialLimiter, async (req, res) => {
+app.post('/api/login', loginLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
 
@@ -304,7 +314,7 @@ app.get('/api/me', async (req, res) => {
 });
 
 // Forgot password - for pre-registered residents only
-app.post('/api/forgot-password', credentialLimiter, async (req, res) => {
+app.post('/api/forgot-password', forgotPasswordLimiter, async (req, res) => {
     try {
         const { email, unitNumber, phone, newPassword, confirmPassword } = req.body;
 

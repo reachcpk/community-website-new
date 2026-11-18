@@ -142,3 +142,9 @@ test('logout ends only the caller\'s session', async () => {
     await api('POST', '/api/logout', null, alice);
     assert.strictEqual((await api('GET', '/api/me', null, alice)).status, 401);
 });
+
+test('re-running init-db revokes existing admin sessions', async () => {
+    const admin = await login(ADMIN.email, ADMIN.password);
+    execFileSync(process.execPath, ['backend/database/init-sqlite.js'], { cwd: ROOT, env: env(), stdio: 'ignore' });
+    assert.strictEqual((await api('GET', '/api/me', null, admin)).status, 401);
+});
