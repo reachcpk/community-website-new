@@ -3,9 +3,9 @@ let currentUser = null;
 let bookings = [];
 
 // Initialize app
-document.addEventListener('DOMContentLoaded', function() {
-    // Check if user is logged in
-    checkLoginStatus();
+document.addEventListener('DOMContentLoaded', async function() {
+    // Check if user is logged in (must finish before pages that depend on it are set up)
+    await checkLoginStatus();
     
     // Setup form handlers
     setupRegistrationForm();
@@ -14,13 +14,16 @@ document.addEventListener('DOMContentLoaded', function() {
     setupBookingForm();
     setupLogout();
     
+    const onAdminPage = isAdminPage();
+
     // Setup admin page if on admin page
-    if (window.location.pathname.includes('admin.html')) {
+    if (onAdminPage && window.location.pathname.includes('admin.html')) {
+        setupRegistrationActions();
         loadRegistrations();
     }
 
     // Setup amenity maintenance page
-    if (window.location.pathname.includes('amenity-maintenance.html')) {
+    if (onAdminPage && window.location.pathname.includes('amenity-maintenance.html')) {
         setupAmenityForm();
         loadAmenitiesAdmin();
     }
@@ -32,20 +35,23 @@ document.addEventListener('DOMContentLoaded', function() {
     setupDateRestriction();
 });
 
-// Check login status
-function checkLoginStatus() {
-    const userCookie = getCookie('society_user');
-    if (userCookie) {
-        try {
-            const user = JSON.parse(userCookie);
-            currentUser = normalizeUser(user);
-            if (document.getElementById('loggedInUser')) {
-                document.getElementById('loggedInUser').textContent = currentUser.name;
-            }
-        } catch (e) {
-            console.error('Error parsing user cookie:', e);
-            deleteCookie('society_user');
+// Check login status with the server (session is held in an HttpOnly cookie)
+async function checkLoginStatus() {
+    // Remove the cookie used by older versions, which the client could tamper with
+    deleteCookie('society_user');
+
+    try {
+        const response = await fetch('/api/me', { credentials: 'same-origin' });
+        if (response.ok) {
+            const result = await response.json();
+            currentUser = normalizeUser(result.user);
         }
+    } catch (e) {
+        console.error('Error checking login status:', e);
+    }
+
+    if (currentUser && document.getElementById('loggedInUser')) {
+        document.getElementById('loggedInUser').textContent = currentUser.name;
     }
     
     // Allow access to home page without login, but show login prompt for booking
@@ -153,12 +159,8 @@ function setupLoginForm() {
             const result = await response.json();
             
             if (result.success) {
-                // Normalize user data (convert snake_case to camelCase)
-                const user = normalizeUser(result.user);
-                
-                // Set cookie for session
-                setCookie('society_user', JSON.stringify(user), 7);
-                currentUser = user;
+                // Session cookie is set by the server
+                currentUser = normalizeUser(result.user);
                 
                 alert('Login successful!');
                 window.location.href = 'index.html';
@@ -246,12 +248,6 @@ function setupBookingForm() {
         const formData = new FormData(bookingForm);
         const data = Object.fromEntries(formData);
         
-        // Add user info (support both camelCase and snake_case from database)
-        data.name = currentUser.name;
-        data.email = currentUser.email;
-        data.phone = currentUser.phone;
-        data.unitNumber = currentUser.unitNumber || currentUser.unit_number;
-        
         // Validate guest count
         if (data.guests > 10) {
             alert('Maximum 10 guests allowed');
@@ -284,10 +280,10 @@ function setupBookingForm() {
                 confirmation.classList.remove('hidden');
                 
                 document.getElementById('confirmation-details').innerHTML = `
-                    <strong>Amenity:</strong> ${data.amenity}<br>
-                    <strong>Date:</strong> ${data.date}<br>
-                    <strong>Time:</strong> ${data.time}<br>
-                    <strong>Guests:</strong> ${data.guests}
+                    <strong>Amenity:</strong> ${escapeHtml(data.amenity)}<br>
+                    <strong>Date:</strong> ${escapeHtml(data.date)}<br>
+                    <strong>Time:</strong> ${escapeHtml(data.time)}<br>
+                    <strong>Guests:</strong> ${escapeHtml(data.guests)}
                 `;
             } else {
                 alert('Booking failed: ' + result.message);
@@ -317,19 +313,12 @@ function setupLogout() {
     logoutBtn.addEventListener('click', async function(e) {
         e.preventDefault();
         
-        if (currentUser) {
-            try {
-                await fetch('/api/logout', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: currentUser.email })
-                });
-            } catch (error) {
-                console.error('Logout error:', error);
-            }
+        try {
+            await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+        } catch (error) {
+            console.error('Logout error:', error);
         }
-        
-        deleteCookie('society_user');
+
         currentUser = null;
         window.location.href = 'login.html';
     });
@@ -351,6 +340,9 @@ async function loadRegistrations() {
             credentials: 'same-origin'
         });
         const registrations = await response.json();
+        if (!response.ok || !Array.isArray(registrations)) {
+            throw new Error(registrations.message || 'Failed to load registrations');
+        }
         
         const loading = document.getElementById('loading');
         const noRegistrations = document.getElementById('noRegistrations');
@@ -365,17 +357,17 @@ async function loadRegistrations() {
         
         tbody.innerHTML = registrations.map(reg => `
             <tr>
-                <td>${reg.name}</td>
-                <td>${reg.email}</td>
-                <td>${reg.phone}</td>
-                <td>${reg.unitNumber}</td>
-                <td>${reg.unitType}</td>
-                <td>${reg.residentType}</td>
-                <td><span class="status-badge status-${reg.status}">${reg.status}</span></td>
+                <td>${escapeHtml(reg.name)}</td>
+                <td>${escapeHtml(reg.email)}</td>
+                <td>${escapeHtml(reg.phone)}</td>
+                <td>${escapeHtml(reg.unit_number)}</td>
+                <td>${escapeHtml(reg.unit_type)}</td>
+                <td>${escapeHtml(reg.resident_type)}</td>
+                <td><span class="status-badge status-${escapeHtml(reg.status)}">${escapeHtml(reg.status)}</span></td>
                 <td>
                     ${reg.status === 'pending' ? `
-                        <button class="approve-button" onclick="approveUser('${reg.email}')">Approve</button>
-                        <button class="approve-button" style="background: #dc3545;" onclick="rejectUser('${reg.email}')">Reject</button>
+                        <button class="approve-button" data-action="approve" data-email="${escapeHtml(reg.email)}">Approve</button>
+                        <button class="approve-button" style="background: #dc3545;" data-action="reject" data-email="${escapeHtml(reg.email)}">Reject</button>
                     ` : '-'}
                 </td>
             </tr>
@@ -384,6 +376,18 @@ async function loadRegistrations() {
         console.error('Error loading registrations:', error);
         document.getElementById('loading').textContent = 'Error loading registrations';
     }
+}
+
+// Approve/reject buttons use data attributes instead of inline handlers built from user input
+function setupRegistrationActions() {
+    const tbody = document.getElementById('registrationsBody');
+    if (!tbody) return;
+    tbody.addEventListener('click', function(e) {
+        const button = e.target.closest('button[data-action]');
+        if (!button) return;
+        if (button.dataset.action === 'approve') approveUser(button.dataset.email);
+        if (button.dataset.action === 'reject') rejectUser(button.dataset.email);
+    });
 }
 
 // Approve user
@@ -529,9 +533,9 @@ async function loadAmenitiesAdmin() {
             <tr>
                 <td>${escapeHtml(a.name)}</td>
                 <td>${escapeHtml(a.description || '-')}</td>
-                <td>${a.created_at ? a.created_at.split(' ')[0] : '-'}</td>
+                <td>${a.created_at ? escapeHtml(a.created_at.split(' ')[0]) : '-'}</td>
                 <td>
-                    <button class="approve-button" style="background: #dc3545;" onclick="deleteAmenity('${a.id}')">Delete</button>
+                    <button class="approve-button" style="background: #dc3545;" onclick="deleteAmenity('${escapeHtml(a.id)}')">Delete</button>
                 </td>
             </tr>
         `).join('');
@@ -571,9 +575,14 @@ function escapeHtml(str) {
     }[c]));
 }
 
-// Update admin link visibility in navbar
+function isAdminPage() {
+    const adminPages = ['admin.html', 'amenity-maintenance.html'];
+    return adminPages.some(p => window.location.pathname.includes(p)) && !!currentUser && currentUser.isAdmin;
+}
+
+// Update admin link visibility in navbar (cosmetic only; the server enforces admin access)
 function updateAdminLink() {
-    const isAdmin = currentUser && (currentUser.residentType === 'admin' || currentUser.resident_type === 'admin' || currentUser.email === 'admin@society.com');
+    const isAdmin = !!currentUser && currentUser.isAdmin;
     document.querySelectorAll('.admin-only').forEach(el => {
         el.style.display = isAdmin ? '' : 'none';
     });
@@ -589,11 +598,7 @@ function protectAdminPage() {
             return;
         }
 
-        const isAdmin = currentUser.residentType === 'admin' ||
-                       currentUser.resident_type === 'admin' ||
-                       currentUser.email === 'admin@society.com';
-
-        if (!isAdmin) {
+        if (!currentUser.isAdmin) {
             alert('You do not have permission to access the admin page.');
             window.location.href = 'index.html';
         }
@@ -612,6 +617,7 @@ function normalizeUser(user) {
         unitType: user.unitType || user.unit_type,
         residentType: user.residentType || user.resident_type,
         status: user.status,
+        isAdmin: !!(user.isAdmin || user.is_admin),
         createdAt: user.createdAt || user.created_at
     };
 }
@@ -620,13 +626,6 @@ function normalizeUser(user) {
 function setCookie(name, value, days) {
     const expires = new Date(Date.now() + days * 864e5).toUTCString();
     document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + expires + '; path=/';
-}
-
-function getCookie(name) {
-    return document.cookie.split('; ').reduce((r, v) => {
-        const parts = v.split('=');
-        return parts[0] === name ? decodeURIComponent(parts[1]) : r;
-    }, '');
 }
 
 function deleteCookie(name) {

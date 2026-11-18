@@ -3,9 +3,23 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const crypto = require('crypto');
+const { applySchema, resolveDbPath } = require('../database/schema');
+const { hashPassword, verifyPassword, needsRehash } = require('../auth/password');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+const SESSION_COOKIE = 'society_session';
+const SESSION_TTL_DAYS = 7;
+const MAX_GUESTS = 10;
+const UNIT_MIN = 100;
+const UNIT_MAX = 6000;
+const UNIT_TYPES = ['1BHK', '2BHK', '3BHK', '4BHK', 'penthouse'];
+const RESIDENT_TYPES = ['owner', 'tenant'];
+const TIME_SLOTS = [
+    '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00', '13:00-14:00',
+    '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00', '19:00-20:00'
+];
 
 // Middleware
 app.use(express.json());
@@ -13,24 +27,13 @@ app.use(express.static(path.join(__dirname, '../../frontend/html')));
 app.use('/css', express.static(path.join(__dirname, '../../frontend/css')));
 app.use('/js', express.static(path.join(__dirname, '../../frontend/js')));
 
-// Database configuration - use new structure
-const dbPath = path.join(__dirname, '../database/society-booking.db');
+const dbPath = resolveDbPath();
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error('Database connection failed:', err.message);
         process.exit(1);
     }
     console.log('Connected to SQLite database successfully!');
-});
-
-// Ensure amenities table exists (safe for already-initialized databases)
-db.exec(`CREATE TABLE IF NOT EXISTS amenities (
-    id TEXT PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
-    description TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)`, (err) => {
-    if (err) console.error('Amenities table setup failed:', err.message);
 });
 
 // Helper function to run queries
@@ -59,67 +62,116 @@ function parseCookies(req) {
     if (cookieHeader) {
         cookieHeader.split(';').forEach(cookie => {
             const [name, ...rest] = cookie.trim().split('=');
-            cookies[name] = decodeURIComponent(rest.join('='));
+            try {
+                cookies[name] = decodeURIComponent(rest.join('='));
+            } catch {
+                cookies[name] = rest.join('=');
+            }
         });
     }
     return cookies;
 }
 
-// Admin authentication middleware
-async function requireAdmin(req, res, next) {
+function setSessionCookie(res, sessionId) {
+    res.cookie(SESSION_COOKIE, sessionId, {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: SESSION_TTL_DAYS * 24 * 60 * 60 * 1000,
+        path: '/'
+    });
+}
+
+function clearSessionCookie(res) {
+    res.clearCookie(SESSION_COOKIE, { path: '/' });
+}
+
+function isAdminUser(user) {
+    return user.resident_type === 'admin' || (!!process.env.ADMIN_EMAIL && user.email === process.env.ADMIN_EMAIL);
+}
+
+function publicUser(user) {
+    const { password: _, ...rest } = user;
+    return { ...rest, is_admin: isAdminUser(user) };
+}
+
+// Loads the logged-in user from the server-side session referenced by the HttpOnly cookie
+async function loadSessionUser(req) {
+    const sessionId = parseCookies(req)[SESSION_COOKIE];
+    if (!sessionId) return null;
+
+    const rows = await query(
+        `SELECT users.* FROM sessions
+         JOIN users ON users.id = sessions.user_id
+         WHERE sessions.id = ? AND sessions.active = 1
+           AND sessions.created_at > datetime('now', ?)`,
+        [sessionId, `-${SESSION_TTL_DAYS} days`]
+    );
+    const user = rows[0];
+    if (!user || user.status !== 'approved') return null;
+    return { user, sessionId };
+}
+
+async function requireAuth(req, res, next) {
     try {
-        const cookies = parseCookies(req);
-        const userCookie = cookies.society_user;
-
-        if (!userCookie) {
-            return res.status(401).json({ success: false, message: 'Please login as admin' });
+        const session = await loadSessionUser(req);
+        if (!session) {
+            return res.status(401).json({ success: false, message: 'Please login first' });
         }
-
-        const user = JSON.parse(userCookie);
-        const email = user.email;
-
-        if (!email) {
-            return res.status(401).json({ success: false, message: 'Invalid session' });
-        }
-
-        // Check if user is admin
-        const adminEmail = process.env.ADMIN_EMAIL || 'admin@society.com';
-        const adminUsers = await query(
-            'SELECT * FROM users WHERE email = ? AND (resident_type = ? OR email = ?)',
-            [email, 'admin', adminEmail]
-        );
-
-        if (adminUsers.length === 0) {
-            return res.status(403).json({ success: false, message: 'Admin access required' });
-        }
-
-        req.adminUser = adminUsers[0];
+        req.user = session.user;
+        req.sessionId = session.sessionId;
         next();
     } catch (error) {
-        console.error('Admin auth error:', error);
+        console.error('Auth error:', error);
         res.status(401).json({ success: false, message: 'Authentication failed' });
     }
 }
 
-// Password hashing
-function hashPassword(password) {
-    return crypto.createHash('sha256').update(password).digest('hex');
+function requireAdmin(req, res, next) {
+    requireAuth(req, res, () => {
+        if (!isAdminUser(req.user)) {
+            return res.status(403).json({ success: false, message: 'Admin access required' });
+        }
+        req.adminUser = req.user;
+        next();
+    });
 }
+
+// Simple in-memory rate limiter for credential endpoints
+function rateLimit({ windowMs, max }) {
+    const hits = new Map();
+    return (req, res, next) => {
+        const now = Date.now();
+        const key = `${req.ip}:${req.path}`;
+        const entry = hits.get(key);
+        if (!entry || now - entry.start > windowMs) {
+            hits.set(key, { start: now, count: 1 });
+            return next();
+        }
+        entry.count += 1;
+        if (entry.count > max) {
+            return res.status(429).json({ success: false, message: 'Too many attempts. Please try again later.' });
+        }
+        next();
+    };
+}
+const credentialLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
 
 // Normalize phone number for comparison
-// Strips non-digits, removes leading zero(s), and removes common country code prefixes like 91
+// Keeps the last 10 digits so "+91 98765 43210", "098765 43210" and "9876543210" all match
 function normalizePhone(phone) {
     if (!phone) return '';
-    return phone.toString()
-        .replace(/\D/g, '')       // Remove all non-digit characters
-        .replace(/^0+/, '')        // Remove leading zero(s)
-        .replace(/^(91|0)/, '');   // Remove India country code or extra leading zero
+    return phone.toString().replace(/\D/g, '').slice(-10);
 }
 
-// Check if user has active session
-async function hasActiveSession(email) {
-    const result = await query('SELECT * FROM sessions WHERE email = ? AND active = 1', [email]);
-    return result.length > 0;
+function todayLocalISO() {
+    const now = new Date();
+    const offset = now.getTimezoneOffset() * 60000;
+    return new Date(now - offset).toISOString().split('T')[0];
+}
+
+function isNonEmptyString(value) {
+    return typeof value === 'string' && value.trim().length > 0;
 }
 
 // API Routes
@@ -151,11 +203,27 @@ app.post('/api/check-unit', async (req, res) => {
 // Register new user
 app.post('/api/register', async (req, res) => {
     try {
-        const { name, email, phone, unitNumber, unitType, residentType, password } = req.body;
+        const { name, email, phone, unitType, residentType, password } = req.body;
+        const unitNumber = Number(req.body.unitNumber);
 
-        // Validate unit number range
-        if (unitNumber < 100 || unitNumber > 6000) {
-            return res.json({ success: false, message: 'Unit number must be between 100 and 6000' });
+        if (![name, email, phone, unitType, residentType, password].every(isNonEmptyString)) {
+            return res.status(400).json({ success: false, message: 'All fields are required' });
+        }
+
+        if (!Number.isInteger(unitNumber) || unitNumber < UNIT_MIN || unitNumber > UNIT_MAX) {
+            return res.json({ success: false, message: `Unit number must be between ${UNIT_MIN} and ${UNIT_MAX}` });
+        }
+
+        if (!UNIT_TYPES.includes(unitType)) {
+            return res.status(400).json({ success: false, message: 'Invalid unit type' });
+        }
+
+        if (!RESIDENT_TYPES.includes(residentType)) {
+            return res.status(400).json({ success: false, message: 'Invalid resident type' });
+        }
+
+        if (password.length < 6) {
+            return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
         }
 
         // Check if email already exists
@@ -170,11 +238,9 @@ app.post('/api/register', async (req, res) => {
             return res.json({ success: false, message: 'Unit number already registered' });
         }
 
-        // Create new user
-        const userId = Date.now().toString();
         await run(
             'INSERT INTO users (id, name, email, phone, unit_number, unit_type, resident_type, password, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [userId, name, email, phone, unitNumber, unitType, residentType, hashPassword(password), 'pending']
+            [crypto.randomUUID(), name.trim(), email.trim(), phone.trim(), unitNumber, unitType, residentType, hashPassword(password), 'pending']
         );
 
         res.json({ success: true, message: 'Registration submitted for approval' });
@@ -185,50 +251,60 @@ app.post('/api/register', async (req, res) => {
 });
 
 // Login user
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', credentialLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        const users = await query(
-            'SELECT * FROM users WHERE email = ? AND password = ?',
-            [email, hashPassword(password)]
-        );
+        const users = await query('SELECT * FROM users WHERE email = ?', [email]);
+        const user = users[0];
 
-        if (users.length === 0) {
+        if (!user || !verifyPassword(password, user.password)) {
             return res.json({ success: false, message: 'Invalid credentials' });
         }
-
-        const user = users[0];
 
         // Check if user is approved
         if (user.status !== 'approved') {
             return res.json({ success: false, message: 'Account not approved by admin' });
         }
 
-        // Check if user already has active session
-        const hasSession = await hasActiveSession(email);
-        if (hasSession) {
-            return res.json({ success: false, message: 'User already logged in. Please logout first.' });
+        // Upgrade legacy unsalted hashes on successful login
+        if (needsRehash(user.password)) {
+            await run('UPDATE users SET password = ? WHERE id = ?', [hashPassword(password), user.id]);
         }
 
-        // Create session
+        // Only one active session per user: a new login ends any previous session
+        await run('UPDATE sessions SET active = 0 WHERE user_id = ?', [user.id]);
+
         const sessionId = crypto.randomUUID();
         await run(
             'INSERT INTO sessions (id, email, user_id, active) VALUES (?, ?, ?, 1)',
-            [sessionId, email, user.id]
+            [sessionId, user.email, user.id]
         );
 
-        // Return user data (without password)
-        const { password: _, ...userWithoutPassword } = user;
-        res.json({ success: true, user: userWithoutPassword });
+        setSessionCookie(res, sessionId);
+        res.json({ success: true, user: publicUser(user) });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ success: false, message: 'Login failed' });
     }
 });
 
-// Forgot password - for pre-registered users only
-app.post('/api/forgot-password', async (req, res) => {
+// Current logged-in user
+app.get('/api/me', async (req, res) => {
+    try {
+        const session = await loadSessionUser(req);
+        if (!session) {
+            return res.status(401).json({ success: false, message: 'Not logged in' });
+        }
+        res.json({ success: true, user: publicUser(session.user) });
+    } catch (error) {
+        console.error('Session lookup error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Forgot password - for pre-registered residents only
+app.post('/api/forgot-password', credentialLimiter, async (req, res) => {
     try {
         const { email, unitNumber, phone, newPassword, confirmPassword } = req.body;
 
@@ -258,29 +334,21 @@ app.post('/api/forgot-password', async (req, res) => {
         );
 
         // Match user by normalized phone number
-        const user = users.find(u => normalizePhone(u.phone) === normalizedInputPhone);
+        const user = users.find(u => normalizedInputPhone && normalizePhone(u.phone) === normalizedInputPhone);
 
         if (!user) {
             return res.status(404).json({ success: false, message: 'No matching pre-registered resident found. Please check your details or wait for admin approval.' });
         }
 
-        // Prevent changing admin password through this flow (optional security)
-        if (user.resident_type === 'admin' && user.email !== process.env.ADMIN_EMAIL) {
+        // Admin passwords are managed via .env + `npm run init-db`, never through this public form
+        if (isAdminUser(user)) {
             return res.status(403).json({ success: false, message: 'Admin password cannot be reset here' });
         }
 
-        // Update password
-        const hashedPassword = hashPassword(newPassword);
-        await run(
-            'UPDATE users SET password = ? WHERE id = ?',
-            [hashedPassword, user.id]
-        );
+        await run('UPDATE users SET password = ? WHERE id = ?', [hashPassword(newPassword), user.id]);
 
         // Clear any active sessions for this user
-        await run(
-            'UPDATE sessions SET active = 0 WHERE email = ?',
-            [email]
-        );
+        await run('UPDATE sessions SET active = 0 WHERE user_id = ?', [user.id]);
 
         res.json({ success: true, message: 'Password reset successful. Please login with your new password.' });
     } catch (error) {
@@ -292,13 +360,11 @@ app.post('/api/forgot-password', async (req, res) => {
 // Logout user
 app.post('/api/logout', async (req, res) => {
     try {
-        const { email } = req.body;
-
-        await run(
-            'UPDATE sessions SET active = 0 WHERE email = ?',
-            [email]
-        );
-
+        const sessionId = parseCookies(req)[SESSION_COOKIE];
+        if (sessionId) {
+            await run('UPDATE sessions SET active = 0 WHERE id = ?', [sessionId]);
+        }
+        clearSessionCookie(res);
         res.json({ success: true });
     } catch (error) {
         console.error('Logout error:', error);
@@ -324,7 +390,7 @@ app.post('/api/amenities', requireAdmin, async (req, res) => {
     try {
         const { name, description } = req.body;
 
-        if (!name || !name.trim()) {
+        if (!isNonEmptyString(name)) {
             return res.status(400).json({ success: false, message: 'Amenity name is required' });
         }
 
@@ -337,7 +403,7 @@ app.post('/api/amenities', requireAdmin, async (req, res) => {
         const amenityId = crypto.randomUUID();
         await run(
             'INSERT INTO amenities (id, name, description) VALUES (?, ?, ?)',
-            [amenityId, trimmedName, (description || '').trim()]
+            [amenityId, trimmedName, String(description || '').trim()]
         );
 
         res.json({ success: true, message: 'Amenity created', amenity: { id: amenityId, name: trimmedName } });
@@ -363,10 +429,38 @@ app.delete('/api/amenities/:id', requireAdmin, async (req, res) => {
     }
 });
 
-// Book amenity
-app.post('/api/book', async (req, res) => {
+// Book amenity (resident identity comes from the session, never from the request body)
+app.post('/api/book', requireAuth, async (req, res) => {
     try {
-        const { name, email, phone, unitNumber, amenity, date, time, guests, notes } = req.body;
+        const { amenity, date, time, notes } = req.body;
+        const guests = Number(req.body.guests);
+        const user = req.user;
+
+        if (!amenity || !date || !time || !req.body.guests) {
+            return res.status(400).json({ success: false, message: 'Missing required booking fields' });
+        }
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) {
+            return res.status(400).json({ success: false, message: 'Invalid booking date' });
+        }
+
+        if (date < todayLocalISO()) {
+            return res.json({ success: false, message: 'Cannot book for past dates' });
+        }
+
+        if (!TIME_SLOTS.includes(time)) {
+            return res.status(400).json({ success: false, message: 'Invalid time slot' });
+        }
+
+        if (!Number.isInteger(guests) || guests < 1 || guests > MAX_GUESTS) {
+            return res.json({ success: false, message: `Guests must be between 1 and ${MAX_GUESTS}` });
+        }
+
+        // Validate amenity exists
+        const amenityExists = await query('SELECT id FROM amenities WHERE name = ?', [amenity]);
+        if (amenityExists.length === 0) {
+            return res.json({ success: false, message: 'Selected amenity is not available' });
+        }
 
         // Check for duplicate booking (same amenity, date, time)
         const duplicateAmenity = await query(
@@ -381,38 +475,25 @@ app.post('/api/book', async (req, res) => {
         // Check for same user booking multiple amenities at same time
         const sameUserConflict = await query(
             'SELECT id FROM bookings WHERE (email = ? OR phone = ?) AND booking_date = ? AND time_slot = ?',
-            [email, phone, date, time]
+            [user.email, user.phone, date, time]
         );
 
         if (sameUserConflict.length > 0) {
             return res.json({ success: false, message: 'You already have another amenity booked at this time' });
         }
 
-        // Validate required fields
-        if (!name || !email || !phone || !unitNumber || !amenity || !date || !time || !guests) {
-            return res.status(400).json({ success: false, message: 'Missing required booking fields' });
-        }
-
-        // Validate amenity exists
-        const amenityExists = await query('SELECT id FROM amenities WHERE name = ?', [amenity]);
-        if (amenityExists.length === 0) {
-            return res.json({ success: false, message: 'Selected amenity is not available' });
-        }
-
-        // Create booking
-        const bookingId = Date.now().toString();
         await run(
             'INSERT INTO bookings (id, name, email, phone, unit_number, amenity, booking_date, time_slot, guests, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [bookingId, name, email, phone, unitNumber, amenity, date, time, parseInt(guests), notes || '']
+            [crypto.randomUUID(), user.name, user.email, user.phone, user.unit_number, amenity, date, time, guests, String(notes || '')]
         );
 
         res.json({ success: true, message: 'Booking confirmed' });
     } catch (error) {
         console.error('Booking error:', error);
-        const errorMessage = error.message && error.message.includes('SQLITE_CONSTRAINT')
-            ? 'Booking failed: Missing required information. Please ensure all fields are filled.'
-            : 'Booking failed: Server error. Please try again.';
-        res.status(500).json({ success: false, message: errorMessage });
+        if (error.message && error.message.includes('UNIQUE constraint failed: bookings.amenity')) {
+            return res.json({ success: false, message: 'This amenity is already booked for this time slot' });
+        }
+        res.status(500).json({ success: false, message: 'Booking failed: Server error. Please try again.' });
     }
 });
 
@@ -420,7 +501,7 @@ app.post('/api/book', async (req, res) => {
 app.get('/api/registrations', requireAdmin, async (req, res) => {
     try {
         const registrations = await query(
-            'SELECT name, email, phone, unit_number, unit_type, resident_type, status FROM users'
+            'SELECT name, email, phone, unit_number, unit_type, resident_type, status FROM users ORDER BY created_at DESC'
         );
         res.json(registrations);
     } catch (error) {
@@ -429,57 +510,45 @@ app.get('/api/registrations', requireAdmin, async (req, res) => {
     }
 });
 
-// Approve user (admin)
-app.post('/api/approve', requireAdmin, async (req, res) => {
+async function setUserStatus(req, res, status, label) {
     try {
         const { email } = req.body;
 
-        const result = await run(
-            'UPDATE users SET status = ? WHERE email = ?',
-            ['approved', email]
-        );
+        const result = await run('UPDATE users SET status = ? WHERE email = ?', [status, email]);
 
         if (result.changes === 0) {
             return res.json({ success: false, message: 'User not found' });
         }
 
-        res.json({ success: true, message: 'User approved' });
+        res.json({ success: true, message: `User ${label}` });
     } catch (error) {
-        console.error('Approve error:', error);
-        res.status(500).json({ success: false, message: 'Approval failed' });
+        console.error(`${label} error:`, error);
+        res.status(500).json({ success: false, message: `Failed to update user` });
     }
-});
+}
+
+// Approve user (admin)
+app.post('/api/approve', requireAdmin, (req, res) => setUserStatus(req, res, 'approved', 'approved'));
 
 // Reject user (admin)
-app.post('/api/reject', requireAdmin, async (req, res) => {
-    try {
-        const { email } = req.body;
+app.post('/api/reject', requireAdmin, (req, res) => setUserStatus(req, res, 'rejected', 'rejected'));
 
-        const result = await run(
-            'UPDATE users SET status = ? WHERE email = ?',
-            ['rejected', email]
-        );
-
-        if (result.changes === 0) {
-            return res.json({ success: false, message: 'User not found' });
-        }
-
-        res.json({ success: true, message: 'User rejected' });
-    } catch (error) {
-        console.error('Reject error:', error);
-        res.status(500).json({ success: false, message: 'Rejection failed' });
-    }
-});
-
-// Start server
-app.listen(PORT, async () => {
-    let amenityCount = 0;
-    try {
-        const rows = await query('SELECT COUNT(*) as c FROM amenities');
-        amenityCount = rows[0].c;
-    } catch (e) { /* ignore */ }
-    console.log(`Society Hub server running on http://localhost:${PORT}`);
-    console.log(`Society capacity: 250 units (Unit numbers: 100-6000)`);
-    console.log(`Amenities available: ${amenityCount}`);
-    console.log(`Database: SQLite (society-booking.db)`);
-});
+// Start server once the schema is in place
+applySchema(db)
+    .then(() => {
+        app.listen(PORT, async () => {
+            let amenityCount = 0;
+            try {
+                const rows = await query('SELECT COUNT(*) as c FROM amenities');
+                amenityCount = rows[0].c;
+            } catch (e) { /* ignore */ }
+            console.log(`Society Hub server running on http://localhost:${PORT}`);
+            console.log(`Society capacity: 250 units (Unit numbers: ${UNIT_MIN}-${UNIT_MAX})`);
+            console.log(`Amenities available: ${amenityCount}`);
+            console.log(`Database: SQLite (${dbPath})`);
+        });
+    })
+    .catch((err) => {
+        console.error('Database schema setup failed:', err.message);
+        process.exit(1);
+    });

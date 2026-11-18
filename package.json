@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node backend/server/server-simple-sqlite.js",
     "dev": "node backend/server/server-simple-sqlite.js",
-    "init-db": "node backend/database/init-sqlite.js"
+    "init-db": "node backend/database/init-sqlite.js",
+    "test": "node --test test/"
   },
   "keywords": [
     "society",
